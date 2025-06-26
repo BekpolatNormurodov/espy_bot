@@ -1,100 +1,126 @@
 from aiogram import Bot, Dispatcher, types, executor
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
-import logging
+from aiogram.dispatcher import FSMContext
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
+# 🔐 Token
 TOKEN = '7136158913:AAFBYCzwtwLx0x7IQ0JszcwaGxLeBwB2590'
-ADMIN_ID = 123456789  # o'zingizning Telegram ID'ingizni yozing
-
 bot = Bot(token=TOKEN)
-dp = Dispatcher(bot, storage=MemoryStorage())
-logging.basicConfig(level=logging.INFO)
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 
-regions = {
-    "Toshkent": ["Yunusobod", "Chilonzor"],
-    "Andijon": ["Asaka", "Shahrixon"],
-}
-categories = ["Dasturchi", "Haydovchi"]
-
-# Lokal ish ro'yxati (test ma'lumotlar)
-jobs_data = [
-    {
-        "region": "Toshkent",
-        "district": "Yunusobod",
-        "job": "Dasturchi",
-        "salary": 5000000,
-        "company": "ProActive MCHJ",
-        "description": "Shopping dastur tuzish kerak"
-    },
-    {
-        "region": "Toshkent",
-        "district": "Chilonzor",
-        "job": "Haydovchi",
-        "salary": 3000000,
-        "company": "FastGo",
-        "description": "Yuk tashish uchun haydovchi kerak"
-    }
-]
-
+# 🧠 Bosqichlar (holatlar)
 class SearchForm(StatesGroup):
     region = State()
     district = State()
-    category = State()
+    job = State()
     salary = State()
     confirm = State()
     contact = State()
-    location = State()
 
-@dp.message_handler(commands='start')
-async def start(message: types.Message):
+# 📍 Hududlar
+regions = {
+    "Toshkent": ["Chilonzor", "Yunusobod", "Yakkasaroy"],
+    "Andijon": ["Asaka", "Andijon shahri", "Shahrixon"],
+    "Navoiy": ["Zarafshon", "Karmana"]
+}
+
+# 🧾 Ishlar ro'yxati
+jobs = [
+    {
+        "region": "Toshkent",
+        "district": "Chilonzor",
+        "job": "IT",
+        "salary": 4000000,
+        "company": "WebDev.uz",
+        "description": "Frontend dasturchi kerak"
+    },
+    {
+        "region": "Andijon",
+        "district": "Asaka",
+        "job": "Shifokor",
+        "salary": 3000000,
+        "company": "Asaka Shifoxonasi",
+        "description": "Tajribali terapevt kerak"
+    }
+]
+
+# ▶️ /start
+@dp.message_handler(commands=['start'])
+async def send_welcome(message: types.Message):
+    await message.answer("""
+🏁 Assalomu alaykum! Sizga ish topishda yordam beradigan botga xush kelibsiz!
+
+🤖 Bu bot orqali siz o'zingiz xohlagan viloyat va tumandan, o'zingizga mos soha va maoshdagi ishlarni topishingiz mumkin.
+
+📝 Ish topish uchun ariza qoldiring:
+👉 /ariza_qoldirish
+""")
+
+# 🔘 Ariza boshlash
+@dp.message_handler(commands='ariza_qoldirish')
+async def start_search(message: types.Message):
     keyboard = InlineKeyboardMarkup()
     for r in regions:
         keyboard.add(InlineKeyboardButton(r, callback_data=f"region_{r}"))
-    await message.answer("📍 Qaysi viloyatda ish qidiryapsiz?", reply_markup=keyboard)
+    await message.answer("📍 Qaysi viloyatdan ish qidiryapsiz?", reply_markup=keyboard)
     await SearchForm.region.set()
 
+# 📍 Viloyat tanlash
 @dp.callback_query_handler(lambda c: c.data.startswith("region_"), state=SearchForm.region)
 async def select_region(call: types.CallbackQuery, state: FSMContext):
     region = call.data.split("_")[1]
     await state.update_data(region=region)
+
     keyboard = InlineKeyboardMarkup()
     for d in regions[region]:
         keyboard.add(InlineKeyboardButton(d, callback_data=f"district_{d}"))
-    await call.message.edit_text("🏙 Tuman/shaharni tanlang:", reply_markup=keyboard)
+    await call.message.edit_text("🏙 Shahar/tumanni tanlang:", reply_markup=keyboard)
     await SearchForm.district.set()
 
+# 🏙 Tuman tanlash
 @dp.callback_query_handler(lambda c: c.data.startswith("district_"), state=SearchForm.district)
 async def select_district(call: types.CallbackQuery, state: FSMContext):
     district = call.data.split("_")[1]
     await state.update_data(district=district)
-    keyboard = InlineKeyboardMarkup()
-    for c in categories:
-        keyboard.add(InlineKeyboardButton(c, callback_data=f"job_{c}"))
-    await call.message.edit_text("👷 Kasb turini tanlang:", reply_markup=keyboard)
-    await SearchForm.category.set()
 
-@dp.callback_query_handler(lambda c: c.data.startswith("job_"), state=SearchForm.category)
-async def select_job(call: types.CallbackQuery, state: FSMContext):
-    job = call.data.split("_")[1]
-    await state.update_data(job=job)
-    await call.message.answer("💰 Kamida qancha maosh kerak?")
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    buttons = ["👨‍💻 IT va dasturlash", "👩‍⚕ Shifokor / hamshira"]
+    keyboard.add(*[KeyboardButton(text=b) for b in buttons])
+    await call.message.answer("📋 O'zingizga mos ish sohasini tanlang:", reply_markup=keyboard)
+    await SearchForm.job.set()
+
+# 🛠 Kasb tanlash
+@dp.message_handler(state=SearchForm.job)
+async def select_job(message: types.Message, state: FSMContext):
+    job_map = {
+        "👨‍💻 IT va dasturlash": "IT",
+        "👩‍⚕ Shifokor / hamshira": "Shifokor"
+    }
+    job_title = job_map.get(message.text)
+    if not job_title:
+        return await message.answer("❗ Iltimos, tugmalardan birini tanlang.")
+    await state.update_data(job=job_title)
+    await message.answer("💰 Sizni qoniqtiradigan eng kam oylikni yozing (Masalan: 3000000):")
     await SearchForm.salary.set()
 
+# 💰 Maosh kiritish
 @dp.message_handler(state=SearchForm.salary)
 async def input_salary(message: types.Message, state: FSMContext):
     try:
         salary = int(message.text)
     except ValueError:
-        return await message.reply("Iltimos, faqat son kiriting!")
+        return await message.answer("❌ Iltimos, raqam kiriting (Masalan: 3000000)")
     await state.update_data(salary=salary)
     data = await state.get_data()
 
-    # Filter ishlar
     result = [
-        j for j in jobs_data
-        if j['region'] == data['region'] and j['district'] == data['district'] and j['job'] == data['job'] and j['salary'] >= salary
+        j for j in jobs
+        if j.get("region") == data["region"]
+        and j.get("district") == data["district"]
+        and j.get("job") == data["job"]
+        and j.get("salary", 0) >= salary
     ]
 
     if not result:
@@ -103,7 +129,7 @@ async def input_salary(message: types.Message, state: FSMContext):
 
     msg = "🔎 Topilgan ishlar:\n\n"
     for r in result:
-        msg += f"🏢 {r['company']}\n📝 {r['description']}\n💰 {r['salary']} so‘m\n\n"
+        msg += f"🏢 {r['company']}\n📝 {r['description']}\n💰 {r['salary']} so'm\n\n"
     msg += "Zayavka qoldirasizmi?"
 
     keyboard = InlineKeyboardMarkup()
@@ -114,38 +140,29 @@ async def input_salary(message: types.Message, state: FSMContext):
     await message.answer(msg, reply_markup=keyboard)
     await SearchForm.confirm.set()
 
-@dp.callback_query_handler(lambda c: c.data in ["confirm_yes", "confirm_no"], state=SearchForm.confirm)
-async def confirm_application(call: types.CallbackQuery, state: FSMContext):
-    if call.data == "confirm_no":
-        await call.message.edit_text("❌ Zayavka bekor qilindi.")
-        return await state.finish()
-
-    # Agar Ha desa — contact so‘raymiz
+# ✅ Ha bosilganda
+@dp.callback_query_handler(lambda c: c.data == "confirm_yes", state=SearchForm.confirm)
+async def confirm_yes(call: types.CallbackQuery, state: FSMContext):
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    keyboard.add(KeyboardButton("📞 Kontaktni yuborish", request_contact=True))
-    await call.message.answer("📞 Telefon raqamingizni yuboring:", reply_markup=keyboard)
+    button = KeyboardButton("📞 Kontaktni yuborish", request_contact=True)
+    keyboard.add(button)
+    await call.message.answer("📲 Telefon raqamingizni yuboring:", reply_markup=keyboard)
     await SearchForm.contact.set()
 
-@dp.message_handler(content_types=types.ContentType.CONTACT, state=SearchForm.contact)
-async def get_contact(message: types.Message, state: FSMContext):
-    await state.update_data(contact=message.contact.phone_number)
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    keyboard.add(KeyboardButton("📍 Lokatsiyani yuborish", request_location=True))
-    await message.answer("📍 Lokatsiyangizni yuboring:", reply_markup=keyboard)
-    await SearchForm.location.set()
-
-@dp.message_handler(content_types=types.ContentType.LOCATION, state=SearchForm.location)
-async def get_location(message: types.Message, state: FSMContext):
-    lat = message.location.latitude
-    lon = message.location.longitude
-    loc_link = f"https://maps.google.com/?q={lat},{lon}"
-    await state.update_data(location=loc_link)
-    data = await state.get_data()
-
-    # Admin yoki botga xabar
-    await message.answer("✅ Zayavkangiz qabul qilindi! Rahmat.", reply_markup=types.ReplyKeyboardRemove())
-    await bot.send_message(ADMIN_ID, f"🆕 Yangi zayavka:\nTel: {data['contact']}\nLocation: {data['location']}")
+# ❌ Yo‘q bosilganda
+@dp.callback_query_handler(lambda c: c.data == "confirm_no", state=SearchForm.confirm)
+async def confirm_no(call: types.CallbackQuery, state: FSMContext):
+    await call.message.answer("✅ Ariza bekor qilindi.")
     await state.finish()
 
+# ☎️ Kontaktni qabul qilish
+@dp.message_handler(content_types=types.ContentType.CONTACT, state=SearchForm.contact)
+async def get_contact(message: types.Message, state: FSMContext):
+    contact = message.contact.phone_number
+    await state.update_data(contact=contact)
+    await message.answer("✅ Zayavkangiz qabul qilindi! Tez orada siz bilan bog‘lanamiz.", reply_markup=ReplyKeyboardRemove())
+    await state.finish()
+
+# ▶️ Run
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
